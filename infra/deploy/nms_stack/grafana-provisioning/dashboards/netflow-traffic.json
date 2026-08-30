@@ -1,0 +1,62 @@
+{
+  "title": "NetFlow Traffic",
+  "tags": ["netflow", "network", "noc"],
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "title": "Flows per Minute",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [{
+        "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+        "rawSql": "SELECT toStartOfMinute(timestamp) AS t, count() AS c FROM analytics.netflow_logs WHERE timestamp >= now() - 3600 GROUP BY t ORDER BY t"
+      }]
+    },
+    {
+      "title": "Total Traffic (bps)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [{
+        "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+        "rawSql": "SELECT toStartOfMinute(timestamp) AS t, sum(bytes * 8) / 60 AS bps FROM analytics.netflow_logs WHERE timestamp >= now() - 3600 GROUP BY t ORDER BY t"
+      }]
+    },
+    {
+      "title": "Top Talkers (by bytes)",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [{
+        "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+        "rawSql": "SELECT src_ip, count() AS flows, sum(bytes) AS total_bytes, sum(packets) AS total_packets FROM analytics.netflow_logs WHERE timestamp >= now() - 3600 GROUP BY src_ip ORDER BY total_bytes DESC LIMIT 20"
+      }]
+    },
+    {
+      "title": "Protocol Distribution",
+      "type": "piechart",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [{
+        "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+        "rawSql": "SELECT multiIf(protocol=6,'TCP',protocol=17,'UDP',protocol=1,'ICMP',toString(protocol)) AS proto, count() AS c FROM analytics.netflow_logs WHERE timestamp >= now() - 3600 GROUP BY proto ORDER BY c DESC"
+      }]
+    },
+    {
+      "title": "Top Destination Ports",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "targets": [{
+        "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+        "rawSql": "SELECT dst_port, count() AS flows, sum(bytes) AS total_bytes FROM analytics.netflow_logs WHERE timestamp >= now() - 3600 GROUP BY dst_port ORDER BY total_bytes DESC LIMIT 20"
+      }]
+    },
+    {
+      "title": "Recent Flows",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "targets": [{
+        "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+        "rawSql": "SELECT timestamp, src_ip, dst_ip, src_port, dst_port, protocol, bytes, packets FROM analytics.netflow_logs ORDER BY timestamp DESC LIMIT 50"
+      }]
+    }
+  ]
+}

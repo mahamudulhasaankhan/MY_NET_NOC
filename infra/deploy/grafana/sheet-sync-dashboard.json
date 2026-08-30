@@ -1,0 +1,70 @@
+{
+  "title": "Sheet Sync Health",
+  "uid": "nms-sheet-sync",
+  "tags": ["nms", "sheets"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Sheets with sync errors (24h)",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sum(count_over_time(nms_sheet_sync_errors_total[24h]))", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 3 } ] } }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Total sheet rows",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sum(nms_sheet_rows)", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" } } }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Sheet sync errors over time",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sum by (page, sheet) (rate(nms_sheet_sync_errors_total[1d]))", "legendFormat": "{{page}}/{{sheet}}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "bars", "fillOpacity": 60, "lineWidth": 1 } } }
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Per-sheet sync status",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "nms_sheet_rows", "format": "table", "refId": "rows" },
+        { "expr": "time() - nms_sheet_sync_last_success_ts", "format": "table", "refId": "age" },
+        { "expr": "nms_sheet_sync_errors_total", "format": "table", "refId": "err" }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "filterable": true }, "unit": "s" },
+        "overrides": []
+      },
+      "transformations": [
+        { "id": "merge", "options": {} },
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "Time 1": true, "Time 2": true, "Value 1": true, "Value 2": true }, "indexByName": { "page": 0, "sheet": 1, "Value": 2, "Value 3": 3 } } }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Sync duration",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "histogram_quantile(0.9, sum by (le) (rate(nms_sheet_sync_duration_seconds_bucket[1d])))", "legendFormat": "p90", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    }
+  ]
+}

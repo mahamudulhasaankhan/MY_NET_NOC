@@ -1,0 +1,167 @@
+{
+  "title": "Host Monitoring",
+  "tags": ["infrastructure", "noc"],
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "title": "CPU Usage",
+      "type": "gauge",
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0},
+      "targets": [{
+        "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+        "expr": "100 - avg by(instance)(rate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100",
+        "legendFormat": "CPU"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 70},
+              {"color": "red", "value": 90}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Memory Usage",
+      "type": "gauge",
+      "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0},
+      "targets": [{
+        "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+        "expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100",
+        "legendFormat": "Memory"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 70},
+              {"color": "red", "value": 90}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Disk Usage",
+      "type": "gauge",
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0},
+      "targets": [{
+        "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+        "expr": "100 - ((node_filesystem_avail_bytes{mountpoint=\"/\",fstype!=\"\"} / node_filesystem_size_bytes{mountpoint=\"/\",fstype!=\"\"}) * 100)",
+        "legendFormat": "Disk"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 75},
+              {"color": "red", "value": 90}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Uptime",
+      "type": "stat",
+      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
+      "targets": [{
+        "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+        "expr": "time() - node_boot_time_seconds",
+        "legendFormat": "Uptime"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "title": "CPU Load (1m/5m/15m)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+          "expr": "node_load1",
+          "legendFormat": "load 1m"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+          "expr": "node_load5",
+          "legendFormat": "load 5m"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+          "expr": "node_load15",
+          "legendFormat": "load 15m"
+        }
+      ]
+    },
+    {
+      "title": "Network Traffic",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [{
+        "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+        "expr": "rate(node_network_receive_bytes_total{device!~\"lo\"}[1m])",
+        "legendFormat": "rx {{device}}"
+      },
+      {
+        "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+        "expr": "rate(node_network_transmit_bytes_total{device!~\"lo\"}[1m])",
+        "legendFormat": "tx {{device}}"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bps"
+        }
+      }
+    },
+    {
+      "title": "Disk I/O",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "targets": [{
+        "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+        "expr": "rate(node_disk_read_bytes_total[1m])",
+        "legendFormat": "read {{device}}"
+      },
+      {
+        "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+        "expr": "rate(node_disk_written_bytes_total[1m])",
+        "legendFormat": "write {{device}}"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        }
+      }
+    },
+    {
+      "title": "Container Overview",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "targets": [{
+        "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+        "expr": "count(node_cgroup_controller_info) by (instance)",
+        "legendFormat": "Containers"
+      }]
+    }
+  ]
+}

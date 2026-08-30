@@ -1,0 +1,22 @@
+[Unit]
+Description=NMS Grafana alert -> Telegram relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/nms/nms.env
+Environment="APP_ROOT={{APP_ROOT}}"
+ExecStart=/usr/local/bin/telegram-relay
+Restart=always
+RestartSec=5
+User={{SYS_USER}}
+Group={{SYS_GROUP}}
+AmbientCapabilities=
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/tmp
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
