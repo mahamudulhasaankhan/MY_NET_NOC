@@ -1,0 +1,33 @@
+[Unit]
+Description=NMS Polling Worker Engine (instance %i) — Leader-Elected Poller Cluster
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User={{SYS_USER}}
+Group={{SYS_GROUP}}
+WorkingDirectory=/usr/local/bin
+ExecStartPre=/usr/local/bin/nms_engine_ready.sh
+ExecStart=/usr/local/bin/nms_engine --poller --bgp --syslog --netflow
+Restart=always
+RestartSec=3
+EnvironmentFile=/etc/nms/nms.env
+EnvironmentFile=-/etc/nms/workers/%i.env
+Environment="APP_ROOT={{APP_ROOT}}"
+Environment="PORT=%i"
+Environment="GOGC=300"
+Environment="GOMEMLIMIT=192MiB"
+Environment="GOMAXPROCS=2"
+WatchdogSec=30
+MemoryMax=384M
+MemoryHigh=256M
+CPUQuota=200%
+NoNewPrivileges=no
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE CAP_SYS_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+PrivateTmp=no
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

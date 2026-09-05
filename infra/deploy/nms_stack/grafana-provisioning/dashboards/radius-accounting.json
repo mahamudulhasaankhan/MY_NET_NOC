@@ -1,0 +1,159 @@
+{
+  "title": "RADIUS Accounting",
+  "tags": [
+    "radius",
+    "noc"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "title": "Active Sessions",
+      "type": "stat",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "rawSql": "SELECT count() FROM default.radius_acct_raw FINAL WHERE acctstoptime IS NULL"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Total Sessions (24h)",
+      "type": "stat",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "rawSql": "SELECT count() FROM default.radius_acct_raw FINAL WHERE acctstarttime >= now() - 86400"
+        }
+      ]
+    },
+    {
+      "title": "Total Data (24h)",
+      "type": "stat",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "rawSql": "SELECT formatReadableSize(sum(acctinputoctets + acctoutputoctets)) FROM default.radius_acct_raw FINAL WHERE acctstoptime IS NOT NULL AND acctstoptime >= now() - 86400"
+        }
+      ]
+    },
+    {
+      "title": "Sessions Over Time",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "rawSql": "SELECT toStartOfHour(acctstarttime) AS t, count() AS c FROM default.radius_acct_raw FINAL WHERE acctstarttime >= now() - 86400 GROUP BY t ORDER BY t"
+        }
+      ]
+    },
+    {
+      "title": "Top Users by Data",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "rawSql": "SELECT username, count() AS sessions, sum(acctsessiontime) AS total_seconds, formatReadableSize(sum(acctinputoctets + acctoutputoctets)) AS total_data FROM default.radius_acct_raw FINAL WHERE acctstoptime IS NOT NULL GROUP BY username ORDER BY sum(acctinputoctets + acctoutputoctets) DESC LIMIT 20"
+        }
+      ]
+    },
+    {
+      "title": "Recent Sessions",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "rawSql": "SELECT radacctid, username, acctstarttime, acctstoptime, acctterminatecause, acctsessiontime, acctinputoctets, acctoutputoctets, nasipaddress, framedipaddress FROM default.radius_acct_raw FINAL ORDER BY radacctid DESC LIMIT 50"
+        }
+      ]
+    },
+    {
+      "title": "Terminate Causes (24h)",
+      "type": "piechart",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "rawSql": "SELECT acctterminatecause, count() AS c FROM default.radius_acct_raw FINAL WHERE acctstoptime >= now() - 86400 GROUP BY acctterminatecause ORDER BY c DESC"
+        }
+      ]
+    }
+  ]
+}

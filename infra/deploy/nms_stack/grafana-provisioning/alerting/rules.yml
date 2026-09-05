@@ -1,0 +1,208 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: nms-critical
+    folder: NMS Alerts
+    interval: 1m
+    rules:
+      - uid: nms-engine-down
+        title: NMS Engine Down
+        condition: C
+        data:
+          - refId: C
+            datasourceUid: victoriametrics
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: (1 - up{job="nms_engine", instance="host.docker.internal:8000"}) > 0.5
+              instant: true
+        noDataState: OK
+        execErrState: Alerting
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: NMS Go Engine is down (Prometheus cannot scrape /metrics)
+        notification_settings:
+          receiver: webhook-main
+      - uid: nms-engine-5xx
+        title: NMS Engine HTTP 5xx Rate
+        condition: C
+        data:
+          - refId: C
+            datasourceUid: victoriametrics
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: sum(rate(nms_http_requests_total{status=~"5.."}[5m])) by (path) > 0.5
+              instant: true
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'HTTP 5xx errors rising on {{ $labels.path }}'
+        notification_settings:
+          receiver: webhook-main
+      - uid: nms-cache-miss
+        title: NMS Cache Hit Rate Low
+        condition: C
+        data:
+          - refId: C
+            datasourceUid: victoriametrics
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: |
+                sum(rate(nms_cache_hits_total[5m]))
+                / (sum(rate(nms_cache_hits_total[5m])) + sum(rate(nms_cache_misses_total[5m])))
+                < 0.5
+              instant: true
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Redis cache hit rate dropped below 50% for 10 minutes
+        notification_settings:
+          receiver: webhook-main
+      - uid: nms-goroutines
+        title: NMS Engine Goroutine Spike
+        condition: C
+        data:
+          - refId: C
+            datasourceUid: victoriametrics
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: nms_goroutines > 500
+              instant: true
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Engine goroutine count above 500
+        notification_settings:
+          receiver: webhook-main
+      - uid: nms-buffer-data-loss
+        title: NMS Buffer Dropped Records
+        condition: C
+        data:
+          - refId: C
+            datasourceUid: victoriametrics
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: sum(increase(nms_buffer_dropped_total[5m])) > 0
+              instant: true
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Telemetry records dropped by NMS buffer (data loss)
+        notification_settings:
+          receiver: webhook-main
+      - uid: nms-buffer-spill
+        title: NMS Buffer Spilling to Disk
+        condition: C
+        data:
+          - refId: C
+            datasourceUid: victoriametrics
+            relativeTimeRange:
+              from: 900
+              to: 0
+            model:
+              expr: sum(rate(nms_buffer_spilled_total[5m])) > 0
+              instant: true
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: NMS buffer spilling to disk (ClickHouse/NATS recovery in progress)
+        notification_settings:
+          receiver: webhook-main
+
+  - orgId: 1
+    name: nms-node
+    folder: NMS Alerts
+    interval: 1m
+    rules:
+      - uid: nms-node-cpu
+        title: Node CPU Saturation
+        condition: C
+        data:
+          - refId: C
+            datasourceUid: victoriametrics
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: 100 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100 > 90
+              instant: true
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Host CPU above 90% for 10 minutes
+        notification_settings:
+          receiver: webhook-main
+      - uid: nms-node-disk
+        title: Node Disk Full
+        condition: C
+        data:
+          - refId: C
+            datasourceUid: victoriametrics
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: |
+                (1 - (node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+                / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"})) * 100 > 85
+              instant: true
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: Root filesystem above 85% used
+        notification_settings:
+          receiver: webhook-main
+      - uid: nms-node-mem
+        title: Node Memory Pressure
+        condition: C
+        data:
+          - refId: C
+            datasourceUid: victoriametrics
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 90
+              instant: true
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Host memory usage above 90% for 10 minutes
+        notification_settings:
+          receiver: webhook-main
