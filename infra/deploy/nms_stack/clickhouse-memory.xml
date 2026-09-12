@@ -1,0 +1,4 @@
+<clickhouse>
+    <!-- Limit maximum memory usage to 4GB -->
+    <max_server_memory_usage>4294967296</max_server_memory_usage>
+</clickhouse>

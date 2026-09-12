@@ -1,0 +1,15 @@
+[Unit]
+Description=NMS Backup Service
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+User={{SYS_USER}}
+Group={{SYS_GROUP}}
+EnvironmentFile={{APP_ROOT}}/.env
+ExecStart={{APP_ROOT}}/infra/deploy/backup/backup.sh
+StandardOutput=append:/var/log/nms_backup.log
+StandardError=append:/var/log/nms_backup.log
+
+[Install]
+WantedBy=multi-user.target
