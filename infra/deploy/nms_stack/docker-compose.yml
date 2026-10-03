@@ -1,0 +1,320 @@
+services:
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.113.0
+    container_name: nms-victoriametrics
+    restart: always
+    mem_limit: 1024m
+    ports:
+      - "127.0.0.1:8428:8428"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - victoriametrics_data:/victoria-metrics-data
+      - ./victoria-metrics-scrape.yml:/etc/victoria-metrics/scrape.yml:ro
+    command:
+      - "-storageDataPath=/victoria-metrics-data"
+      - "-retentionPeriod=12"
+      - "-promscrape.config=/etc/victoria-metrics/scrape.yml"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8428/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  node_exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: nms-node-exporter
+    restart: always
+    mem_limit: 128m
+    pid: host
+    ports:
+      - "127.0.0.1:9100:9100"
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/host/root"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro
+
+  redis_exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    container_name: nms-redis-exporter
+    restart: always
+    mem_limit: 128m
+    ports:
+      - "127.0.0.1:9121:9121"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - "--redis.addr=redis://:${REDIS_PASSWORD}@host.docker.internal:6380"
+      - "--redis.addr=redis://:${REDIS_PASSWORD}@host.docker.internal:6381"
+      - "--check-keys=nms:leader:worker"
+
+  gitea:
+    image: gitea/gitea:1.26.4
+    container_name: nms-gitea
+    restart: always
+    mem_limit: 512m
+    ports:
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:2222:22"
+    volumes:
+      - gitea_data:/data
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+
+  portainer:
+    image: portainer/portainer-ce:2.45.1
+    container_name: nms-portainer
+    restart: always
+    mem_limit: 128m
+    ports:
+      - "127.0.0.1:9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+
+  redis-queue:
+    image: redis:8-alpine
+    container_name: nms-redis-queue
+    user: "999:999"
+    restart: always
+    mem_limit: 256m
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_queue_data:/data
+      - ./rendered/redis-queue.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$(sed -n 's/^requirepass //p' /usr/local/etc/redis/redis.conf)\" ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis-cache:
+    image: redis:8-alpine
+    container_name: nms-redis-cache
+    user: "999:999"
+    restart: always
+    mem_limit: 512m
+    # Host networking: sentinel "fix-slave-config" rewrites a replica's
+    # master to 127.0.0.1:6380, which is only reachable if ALL redis nodes
+    # share the host net namespace. Bridge mode broke replication after the
+    # first fix-slave-config (replica tried its OWN localhost:6380).
+    network_mode: host
+    volumes:
+      - redis_cache_data:/data
+      - ./rendered/redis-cache.conf:/usr/local/etc/redis/redis-cache.conf:ro
+    # AOF persistence + allkeys-lru.
+    command: redis-server /usr/local/etc/redis/redis-cache.conf
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$(sed -n 's/^requirepass //p' /usr/local/etc/redis/redis-cache.conf)\" -p 6380 ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis HA: synchronous replica of redis-cache (promoted by Sentinel on
+  # master failure; exposed on 6381 so the engine can reach the new master)
+  redis-replica:
+    image: redis:8-alpine
+    container_name: nms-redis-replica
+    user: "999:999"
+    restart: always
+    mem_limit: 512m
+    network_mode: host
+    volumes:
+      - redis_replica_data:/data
+      - ./rendered/redis-replica.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$(sed -n 's/^requirepass //p' /usr/local/etc/redis/redis.conf)\" -p 6381 ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Sentinel trio (quorum 2). Host networking so sentinels see the
+  # master and replica via 127.0.0.1:6380/6381, and so the engine (host)
+  # can reach all three at 127.0.0.1:26379-26381.
+  redis-sentinel-1:
+    image: redis:7.4.1-alpine
+    container_name: nms-redis-sentinel-1
+    restart: always
+    network_mode: host
+    volumes:
+      - ./sentinel/s1:/sentinel
+    command: redis-server /sentinel/sentinel.conf --sentinel --port 26379 --bind 127.0.0.1
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$(sed -n 's/^requirepass //p' /sentinel/sentinel.conf)\" -p 26379 ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis-sentinel-2:
+    image: redis:7.4.1-alpine
+    container_name: nms-redis-sentinel-2
+    restart: always
+    network_mode: host
+    volumes:
+      - ./sentinel/s2:/sentinel
+    command: redis-server /sentinel/sentinel.conf --sentinel --port 26380 --bind 127.0.0.1
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$(sed -n 's/^requirepass //p' /sentinel/sentinel.conf)\" -p 26380 ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis-sentinel-3:
+    image: redis:7.4.1-alpine
+    container_name: nms-redis-sentinel-3
+    restart: always
+    network_mode: host
+    volumes:
+      - ./sentinel/s3:/sentinel
+    command: redis-server /sentinel/sentinel.conf --sentinel --port 26381 --bind 127.0.0.1
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$(sed -n 's/^requirepass //p' /sentinel/sentinel.conf)\" -p 26381 ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  dbgate:
+    image: dbgate/dbgate:6.1.0
+    container_name: nms-dbgate
+    restart: always
+    mem_limit: 128m
+    environment:
+      - ADMIN_PASSWORD=${DBGATE_ADMIN_PASSWORD}
+    ports:
+      - "127.0.0.1:3011:3000"
+    volumes:
+      - dbgate_data:/var/dbgate-data
+
+  radius-balancer:
+    image: nginx:alpine
+    container_name: nms-radius-balancer
+    restart: always
+    mem_limit: 64m
+    ports:
+      - "1812:1812/udp"
+      - "1813:1813/udp"
+    volumes:
+      - ./nginx-radius.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - freeradius
+    networks:
+      - default
+      - db_cluster_net
+
+  freeradius:
+    image: freeradius/freeradius-server:3.2.3
+    container_name: nms-freeradius
+    restart: always
+    mem_limit: 512m
+    # Secrets come from pre-rendered 0600 files (render-secrets-files.sh) —
+    # nothing credential-shaped in env or argv (docker-inspect clean).
+    volumes:
+      - ./rendered/freeradius-sql.conf:/etc/freeradius/mods-enabled/sql:ro
+      - ./rendered/freeradius-clients.conf:/etc/freeradius/clients.conf:ro
+    networks:
+      - default
+      - db_cluster_net
+
+  # Second RADIUS backend: hot standby behind the UDP balancer so a single
+  # FreeRADIUS crash cannot stop customer PPPoE authentication.
+  freeradius-2:
+    image: freeradius/freeradius-server:3.2.3
+    container_name: nms-freeradius-2
+    restart: always
+    mem_limit: 512m
+    # Secrets come from pre-rendered 0600 files (render-secrets-files.sh) —
+    # nothing credential-shaped in env or argv (docker-inspect clean).
+    volumes:
+      - ./rendered/freeradius-sql.conf:/etc/freeradius/mods-enabled/sql:ro
+      - ./rendered/freeradius-clients.conf:/etc/freeradius/clients.conf:ro
+    networks:
+      - default
+      - db_cluster_net
+
+  fastnetmon:
+    build:
+      context: ./fastnetmon
+    image: nms-fastnetmon:local
+    container_name: nms-fastnetmon
+    restart: always
+    mem_limit: 512m
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    network_mode: "host"
+    volumes:
+      - ./fastnetmon/fastnetmon.conf:/etc/fastnetmon.conf:ro
+      - ./fastnetmon/networks_list:/etc/networks_list:ro
+      - ./fastnetmon/notify_about_attack.sh:/usr/local/bin/notify_about_attack.sh:ro
+      - /etc/nms/nms.env:/etc/nms/nms.env:ro
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: nms-clickhouse
+    restart: always
+    mem_limit: 4g
+    # CLICKHOUSE_PASSWORD set here (interpolated from .env) so the image
+    # entrypoint does NOT try to write default-user.xml into the read-only
+    # users.d mount (crash-loop without it). Real password config for the
+    # 'default' user comes from the rendered clickhouse-users.d/99-nms-password.xml
+    # (apply_secrets.sh) — keep both in sync.
+    environment:
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+    ports:
+      - "127.0.0.1:8123:8123"
+      - "127.0.0.1:9001:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./init-clickhouse.sql:/docker-entrypoint-initdb.d/init-clickhouse.sql:ro
+      # users.d must be WRITABLE: the image entrypoint always writes
+      # default-user.xml here (user setup runs even with CLICKHOUSE_PASSWORD
+      # set) — a read-only mount crash-loops the container. Password config
+      # comes from the rendered 99-nms-password.xml (apply_secrets.sh).
+      - ./clickhouse-users.d:/etc/clickhouse-server/users.d
+      - ./clickhouse-memory.xml:/etc/clickhouse-server/config.d/memory.xml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8123/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  nats:
+    image: nats:2.10.14-alpine
+    container_name: nms-nats
+    user: "65534:65534"
+    restart: always
+    mem_limit: 256m
+    ports:
+      - "127.0.0.1:4222:4222"
+    command: "-c /etc/nats/nats-server.conf -m 8222"
+    volumes:
+      - ./rendered/nats-server.conf:/etc/nats/nats-server.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+networks:
+  default:
+  db_cluster_net:
+    name: db_cluster_default
+    external: true
+
+volumes:
+  gitea_data:
+  portainer_data:
+  redis_queue_data:
+  redis_cache_data:
+  redis_replica_data:
+  victoriametrics_data:
+  dbgate_data:
+  clickhouse_data:
