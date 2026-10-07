@@ -1,0 +1,22 @@
+# RADIUS clients — rendered by the freeradius container entrypoint from
+# RADIUS_NAS_SECRET (env-driven; this template carries no secret).
+# Restriction: no internet-wide 0.0.0.0/0 client. Only loopback (engine CoA),
+# the nginx UDP balancer's docker network, and the lab NAS subnets.
+
+client localhost {
+    ipaddr = 127.0.0.1
+    secret = __RADIUS_SECRET__
+    shortname = localhost
+}
+
+client balancer {
+    ipaddr = 172.18.0.0/16
+    secret = __RADIUS_SECRET__
+    shortname = balancer
+}
+
+client nas_lab {
+    ipaddr = 10.10.0.0/16
+    secret = __RADIUS_SECRET__
+    shortname = nas_lab
+}
