@@ -1,0 +1,281 @@
+services:
+  pg-0:
+    # Pinned by digest 2026-10-07: PostgreSQL 18.4 (matches both data dirs and
+    # the host pg_dump/pg_restore clients). DO NOT bump without the procedure:
+    # fresh backup → verify target version's data-dir compatibility → pin new
+    # digest → re-create STANDBY first → verify replication → then primary.
+    # A mutable tag here once broke replication drift-risk: pg-0 and pg-1 must
+    # ALWAYS run the exact same image.
+    image: bitnami/postgresql@sha256:db2312d9b243afa8c3b3f5496e478d17d0dff9791d06f3b93b9567abd86ae92f
+    container_name: pg-0
+    restart: always
+    # Protective cap (bulletproof): a runaway query/leak must not OOM the
+    # host. 2g leaves room for 5000-device syslog/audit write volume.
+    mem_limit: 2g
+    ports:
+      - "127.0.0.1:15432:5432"
+    environment:
+      - POSTGRESQL_CLIENT_AUTHENTICATION_METHOD=md5
+      - POSTGRESQL_REPLICATION_MODE=${PG0_REPL_MODE:-master}
+      - POSTGRESQL_REPLICATION_USER=${PG_REPL_USER}
+      - POSTGRESQL_REPLICATION_PASSWORD=${PG_REPL_PASSWORD}
+      - POSTGRESQL_MASTER_HOST=${PG0_MASTER_HOST:-}
+      - POSTGRESQL_MASTER_PORT_NUMBER=${PG0_MASTER_PORT:-5432}
+      - POSTGRESQL_USERNAME=${PG_USERNAME}
+      - POSTGRESQL_PASSWORD=${PG_PASSWORD}
+      - POSTGRESQL_DATABASE=${PG_DATABASE}
+      - POSTGRESQL_POSTGRES_PASSWORD=${PG_POSTGRES_PASSWORD}
+    volumes:
+      - pg_0_data:/bitnami/postgresql
+
+  pg-1:
+    # Same digest pin as pg-0 — pg-0 and pg-1 must ALWAYS run the identical
+    # image or streaming replication breaks (see the note on pg-0).
+    image: bitnami/postgresql@sha256:db2312d9b243afa8c3b3f5496e478d17d0dff9791d06f3b93b9567abd86ae92f
+    container_name: pg-1
+    restart: always
+    # Same protective cap as pg-0 (see note there).
+    mem_limit: 2g
+    ports:
+      - "127.0.0.1:25432:5432"
+    environment:
+      - POSTGRESQL_CLIENT_AUTHENTICATION_METHOD=md5
+      - POSTGRESQL_REPLICATION_MODE=${PG1_REPL_MODE:-slave}
+      - POSTGRESQL_REPLICATION_USER=${PG_REPL_USER}
+      - POSTGRESQL_REPLICATION_PASSWORD=${PG_REPL_PASSWORD}
+      - POSTGRESQL_MASTER_HOST=${PG1_MASTER_HOST:-pg-0}
+      - POSTGRESQL_MASTER_PORT_NUMBER=5432
+      - POSTGRESQL_POSTGRES_PASSWORD=${PG_POSTGRES_PASSWORD}
+      - POSTGRESQL_USERNAME=${PG_USERNAME}
+      - POSTGRESQL_PASSWORD=${PG_PASSWORD}
+      - POSTGRESQL_DATABASE=${PG_DATABASE}
+    volumes:
+      - pg_1_data:/bitnami/postgresql
+    depends_on:
+      - pg-0
+
+  pgpool:
+    image: pgpool/pgpool:4.4.2
+    container_name: pg-pgpool
+    restart: always
+    # pgpool refuses to start if /run/pgpool/pgpool.pid exists AND the pid in it
+    # belongs to a live process (the pid gets reused inside the new namespace).
+    # A SIGKILL after `docker stop` left a stale pid file on 2026-09-21 and the
+    # container crash-looped until it was removed. Two layers of protection:
+    #  1. give pgpool time to exit cleanly (it removes its own pid file),
+    stop_grace_period: 60s
+    #  2. back the pid dir with an in-memory fs: docker re-creates it EMPTY on
+    #     every start, so even an OOM kill or power loss cannot poison it.
+    tmpfs:
+      - /run/pgpool
+    user: "0:0"
+    # 64 pre-forked children (RADIUS pools + app engines + exporter) no longer
+    # fit in the old 256m limit: docker stats showed 92% usage under normal
+    # load. This container owns failover; the client front door is
+    # pgpool-proxy (host 127.0.0.1:6432 / network alias pgpool-ha).
+    mem_limit: 768m
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/local/bin/docker-static:/usr/local/bin/docker-static:ro
+      - ./failover.sh:/etc/pgpool/failover.sh:ro
+      - pgpool_log:/var/log
+    environment:
+      - PGPOOL_PARAMS_PORT=5432
+      - PGPOOL_PARAMS_LISTEN_ADDRESSES=*
+      - PGPOOL_PARAMS_BACKEND_HOSTNAME0=pg-0
+      - PGPOOL_PARAMS_BACKEND_PORT0=5432
+      - PGPOOL_PARAMS_BACKEND_WEIGHT0=1
+      - PGPOOL_PARAMS_BACKEND_FLAG0=ALLOW_TO_FAILOVER
+      - PGPOOL_PARAMS_BACKEND_HOSTNAME1=pg-1
+      - PGPOOL_PARAMS_BACKEND_PORT1=5432
+      - PGPOOL_PARAMS_BACKEND_WEIGHT1=1
+      - PGPOOL_PARAMS_BACKEND_FLAG1=ALLOW_TO_FAILOVER
+      - PGPOOL_PARAMS_MASTER_SLAVE_MODE=on
+      - PGPOOL_PARAMS_MASTER_SLAVE_SUB_MODE=stream
+      # Load balancing is deliberately OFF: engines previously talked to the
+      # primary directly. Routing SELECTs to the async standby would
+      # (a) serve stale rows right after a write and (b) risk an inconsistent
+      # pg_dump snapshot under statement-level balancing. On a single VM the
+      # standby shares the same CPU/disk, so it is reserved for failover,
+      # not for read scaling.
+      - PGPOOL_PARAMS_LOAD_BALANCE_MODE=off
+      # Capacity: RADIUS (2 x 20 connection pools) + 8 engines + exporter
+      # exceed the default 32 children -> "too many clients already" risk.
+      # 96 children (raised from 64, PLAN_016): after a simultaneous restart
+      # storm (deploy/rollback/reboot) every engine re-establishes its pool at
+      # once and 64 children left ZERO for the healthcheck / sr_check /
+      # engine-ready gate - the active pooler starved (docker exec hung, units
+      # stuck in start-pre, deploys rolled back spuriously).
+      - PGPOOL_PARAMS_NUM_INIT_CHILDREN=96
+      - PGPOOL_PARAMS_MAX_POOL=2
+      - PGPOOL_PARAMS_HEALTH_CHECK_PERIOD=10
+      - PGPOOL_PARAMS_HEALTH_CHECK_TIMEOUT=5
+      - PGPOOL_PARAMS_HEALTH_CHECK_USER=${PG_USERNAME}
+      - PGPOOL_PARAMS_HEALTH_CHECK_PASSWORD=${PG_PASSWORD}
+      - PGPOOL_PARAMS_SR_CHECK_PERIOD=10
+      # SR check runs as rnd_user (NOT repl_user): pgpool resolves backend
+      # passwords from its AES pool_passwd, which the image bootstrap encrypts
+      # from env at FIRST init only — a rotated repl_user password never
+      # propagates there and the pooler marks both backends down (PLAN_016).
+      # rnd_user's pool_passwd entry stays in sync with the live credential.
+      - PGPOOL_PARAMS_SR_CHECK_USER=${PG_USERNAME}
+      - PGPOOL_PARAMS_SR_CHECK_PASSWORD=${PG_PASSWORD}
+      - PGPOOL_PARAMS_FAILOVER_ON_BACKEND_ERROR=on
+      - PGPOOL_PARAMS_FAILOVER_COMMAND=/etc/pgpool/failover.sh %d %h %p %P %m
+      - PGPOOL_PARAMS_CONNECTION_LIFE_TIME=600
+      - PGPOOL_PASSWORD_ENCRYPTION_METHOD=scram-sha-256
+      - POSTGRES_USERNAME=${PG_USERNAME}
+      - POSTGRES_PASSWORD=${PG_PASSWORD}
+      - REPL_USERNAME=${PG_REPL_USER}
+      - REPL_PASSWORD=${PG_REPL_PASSWORD}
+      - PGPOOL_PCP_USER=admin
+      - PGPOOL_PCP_PASSWORD=${PGPOOL_PCP_PASSWORD}
+      - PGPASSWORD=${PG_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "psql -h 127.0.0.1 -p 5432 -U ${PG_USERNAME} -d ${PG_DATABASE} -tAc 'SELECT 1' >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      - pg-0
+      - pg-1
+
+  # Passive standby pooler (same build/config as pgpool) with ONE crucial
+  # difference: FAILOVER_ON_BACKEND_ERROR=off and no failover_command, so it
+  # can never promote a standby. Only pg-pgpool is allowed to run failover.
+  # It has no published port: clients reach the active pooler through
+  # pgpool-proxy right below.
+  pgpool-2:
+    image: pgpool/pgpool:4.4.2
+    container_name: pg-pgpool-2
+    restart: always
+    # See the note on pgpool: same stale-pid protection for the standby pooler.
+    stop_grace_period: 60s
+    tmpfs:
+      - /run/pgpool
+    user: "0:0"
+    mem_limit: 768m
+    volumes:
+      - pgpool_2_log:/var/log
+    environment:
+      - PGPOOL_PARAMS_PORT=5432
+      - PGPOOL_PARAMS_LISTEN_ADDRESSES=*
+      - PGPOOL_PARAMS_BACKEND_HOSTNAME0=pg-0
+      - PGPOOL_PARAMS_BACKEND_PORT0=5432
+      - PGPOOL_PARAMS_BACKEND_WEIGHT0=1
+      - PGPOOL_PARAMS_BACKEND_FLAG0=ALLOW_TO_FAILOVER
+      - PGPOOL_PARAMS_BACKEND_HOSTNAME1=pg-1
+      - PGPOOL_PARAMS_BACKEND_PORT1=5432
+      - PGPOOL_PARAMS_BACKEND_WEIGHT1=1
+      - PGPOOL_PARAMS_BACKEND_FLAG1=ALLOW_TO_FAILOVER
+      - PGPOOL_PARAMS_MASTER_SLAVE_MODE=on
+      - PGPOOL_PARAMS_MASTER_SLAVE_SUB_MODE=stream
+      # Keep identical semantics with pooler-1 (see the comment there):
+      # load balancing off, standby is failover-only.
+      - PGPOOL_PARAMS_LOAD_BALANCE_MODE=off
+      - PGPOOL_PARAMS_NUM_INIT_CHILDREN=96
+      - PGPOOL_PARAMS_MAX_POOL=2
+      - PGPOOL_PARAMS_HEALTH_CHECK_PERIOD=10
+      - PGPOOL_PARAMS_HEALTH_CHECK_TIMEOUT=5
+      - PGPOOL_PARAMS_HEALTH_CHECK_USER=${PG_USERNAME}
+      - PGPOOL_PARAMS_HEALTH_CHECK_PASSWORD=${PG_PASSWORD}
+      - PGPOOL_PARAMS_SR_CHECK_PERIOD=10
+      # SR check runs as rnd_user (NOT repl_user): pgpool resolves backend
+      # passwords from its AES pool_passwd, which the image bootstrap encrypts
+      # from env at FIRST init only — a rotated repl_user password never
+      # propagates there and the pooler marks both backends down (PLAN_016).
+      # rnd_user's pool_passwd entry stays in sync with the live credential.
+      - PGPOOL_PARAMS_SR_CHECK_USER=${PG_USERNAME}
+      - PGPOOL_PARAMS_SR_CHECK_PASSWORD=${PG_PASSWORD}
+      # Never promote from the standby pooler:
+      - PGPOOL_PARAMS_FAILOVER_ON_BACKEND_ERROR=off
+      - PGPOOL_PARAMS_CONNECTION_LIFE_TIME=600
+      - PGPOOL_PASSWORD_ENCRYPTION_METHOD=scram-sha-256
+      - POSTGRES_USERNAME=${PG_USERNAME}
+      - POSTGRES_PASSWORD=${PG_PASSWORD}
+      - REPL_USERNAME=${PG_REPL_USER}
+      - REPL_PASSWORD=${PG_REPL_PASSWORD}
+      - PGPOOL_PCP_USER=admin
+      - PGPOOL_PCP_PASSWORD=${PGPOOL_PCP_PASSWORD}
+      - PGPASSWORD=${PG_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "psql -h 127.0.0.1 -p 5432 -U ${PG_USERNAME} -d ${PG_DATABASE} -tAc 'SELECT 1' >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      - pg-0
+      - pg-1
+
+  # DB front door: HA-aware TCP (L4) proxy in front of BOTH poolers.
+  #   host processes (engines, backup, drill) -> 127.0.0.1:6432
+  #   containers (FreeRADIUS, ...)            -> pgpool-ha:5432
+  # Requests go to pg-pgpool and are only sent to pg-pgpool-2 while pg-pgpool
+  # is unreachable, so a single pooler crash no longer takes the NOC offline.
+  # docker's embedded DNS is re-resolved every 10s (pooler restarts/new IPs
+  # are picked up automatically, no reload needed).
+  pgpool-proxy:
+    image: nginx:1.27-alpine
+    container_name: pgpool-proxy
+    restart: always
+    mem_limit: 64m
+    volumes:
+      - ./pgpool-proxy.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      default:
+        aliases:
+          - pgpool-ha
+      monitor:
+        aliases:
+          - pgpool-ha
+    ports:
+      - "127.0.0.1:6432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 5432"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      - pgpool
+      - pgpool-2
+
+  pg-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: pg-exporter
+    restart: always
+    mem_limit: 128m
+    networks:
+      - default
+      - monitor
+    ports:
+      - "127.0.0.1:9187:9187"
+    environment:
+      - DATA_SOURCE_NAME_FILE=/run/secrets/pg-exporter-dsn
+    secrets:
+      - pg_exporter_dsn
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9187/metrics"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  pg_0_data:
+  pg_1_data:
+  pgpool_log:
+  pgpool_2_log:
+
+networks:
+  default:
+    name: db_cluster_default
+  monitor:
+    name: nms_stack_default
+    external: true
+
+secrets:
+  pg_exporter_dsn:
+    file: ../nms_stack/rendered/pg-exporter-dsn.txt

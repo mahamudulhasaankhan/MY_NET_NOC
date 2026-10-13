@@ -1,0 +1,9 @@
+# ── Protected networks (FastNetMon allocates per-host counters for these) ──
+# ⚠️  /8-/12-sized lists need ~12 GB RAM — use ONLY your real IP space!
+# Memory requirement ≈ (total hosts) × ~1 KB; the container needs mem_limit ≥ that.
+#
+# Operator LAN (management/office — adjust to your real LAN):
+10.10.0.0/16
+# 👉 ADD YOUR PUBLIC / CUSTOMER PREFIXES HERE, e.g.:
+# 103.x.y.0/24
+# 203.0.113.0/24
