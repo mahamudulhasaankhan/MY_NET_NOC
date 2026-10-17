@@ -1,0 +1,38 @@
+# DB access-path HA front door (single host).
+#
+# Clients connect here instead of a single pgpool container:
+#   * host processes (engines, backups, drills) -> 127.0.0.1:6432
+#   * containers (FreeRADIUS, pg-exporter)     -> pgpool-ha:5432
+#
+# pg-pgpool   = pooler-1, the only instance allowed to promote a standby.
+# pg-pgpool-2 = passive standby pooler, used only while pooler-1 is
+#               unreachable (no failover, see docker-compose.yml).
+#
+# docker's embedded DNS (127.0.0.11) is re-resolved every 10s, so a pooler
+# restart or recreate (new container IP) is picked up automatically.
+worker_processes 1;
+
+events {
+    worker_connections 1024;
+}
+
+stream {
+    access_log off;
+    resolver 127.0.0.11 valid=10s ipv6=off;
+
+    upstream pgpool_ha {
+        zone pgpool_ha 64k;
+        server pg-pgpool:5432 resolve max_fails=1 fail_timeout=5s;
+        server pg-pgpool-2:5432 resolve max_fails=1 fail_timeout=5s backup;
+    }
+
+    server {
+        listen 5432;
+        proxy_connect_timeout 3s;
+        # Long-lived pooled PostgreSQL connections must not be cut off.
+        proxy_timeout 1h;
+        # If the primary pooler refuses the connection, retry the standby.
+        proxy_next_upstream on;
+        proxy_pass pgpool_ha;
+    }
+}
