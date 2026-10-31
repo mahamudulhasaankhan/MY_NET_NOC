@@ -1,0 +1,18 @@
+# NEVER track credentials in the public distribution.
+*.env
+!*.env.example
+nms.env
+sentinel/s*/
+!sentinel/sentinel.conf.template
+clickhouse-users.d/*.xml
+!clickhouse-users.d/*.xml.template
+grafana-provisioning/datasources/
+grafana-user.sql
+.htpasswd
+ssl/
+certs/
+keys/
+data/
+logs/
+*.log
+rendered/
