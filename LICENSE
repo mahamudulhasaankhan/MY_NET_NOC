@@ -1,0 +1,35 @@
+                    GNU AFFERO GENERAL PUBLIC LICENSE
+                       Version 3, 19 November 2007
+
+ Copyright (C) 2026 Md. Mahamudul Hassan Khan <https://www.linkedin.com/in/md-mahamudul-hassan-khan/>
+ Everyone is permitted to copy and distribute verbatim copies
+ of this license document, but changing it is not allowed.
+
+                            Preamble
+
+  The GNU Affero General Public License is a free, copyleft license for
+software and other kinds of works, specifically designed to ensure
+cooperation with the community in the case of network server software.
+
+========================================================================
+                 ADDITIONAL ATTRIBUTION & INTEGRITY TERMS
+                       (Section 7(b) Compliance)
+========================================================================
+
+1. Mandatory Author Attribution:
+   All deployments, distributions, forks, derivative works, or web-based
+   instances derived from this software MUST preserve and visibly display
+   the original author attribution and clickable profile link:
+   "Designed & Engineered by Md. Mahamudul Hassan Khan (https://www.linkedin.com/in/md-mahamudul-hassan-khan/)"
+   in the web user interface footer, login screen, and API identity endpoints.
+
+2. Prohibition on Obscuration or Tampering:
+   Removing, modifying, obfuscating, or hiding the author attribution,
+   copyright notices, or integrity verification signatures from any visual
+   interface, compiled binary, or API response is strictly prohibited and
+   constitutes an immediate breach and termination of license permissions.
+
+========================================================================
+
+For the full standard text of the GNU Affero General Public License v3,
+see: https://www.gnu.org/licenses/agpl-3.0.html

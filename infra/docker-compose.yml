@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  engine:
+    build: 
+      context: ../backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_USER=noc_user
+      - DB_PASS=noc_pass
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=noc_db
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - engine
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=noc_user
+      - POSTGRES_PASSWORD=noc_pass
+      - POSTGRES_DB=noc_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
